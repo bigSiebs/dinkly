@@ -17,7 +17,9 @@ class BaseDinkly
 
 	protected $module_footer;
 
-	protected $context;
+	protected $request;
+
+	protected $context = array();
 
 	protected $view;
 
@@ -123,18 +125,27 @@ class BaseDinkly
 	}
 
 	/**
-	 * Interpret friendly URLS and load app and module based on Context 
-	 * as well as interpreting parameters where applicable
-	 * @param string $uri default null to be parsed to get correct context
-	 * @return Array of matching objects or false if not found
+	 * Responds to a request object.
+	 *
+	 * @param DinklyRequest $request object from which context is derived
+	 */
+	public function handle($request)
+	{
+		$this->request = $request;
+		$this->getContext();
+		$_SESSION['dinkly']['current_app_name'] = $request->getApp();
+		$this->loadModule($request->getApp(), $request->getModule(), $request->getView(), false, $request->fetchGetParams());
+	}
+
+	/**
+	 * Creates and responds to a request object.
+	 *
+	 * @param string $uri default null to be parsed to get current context
 	 */
 	public function route($uri = null)
 	{
-		$context = $this->getContext($uri);
-
-		$_SESSION['dinkly']['current_app_name'] = $context['current_app_name'];
-
-		$this->loadModule($context['current_app_name'], $context['module'], $context['view'], false, $context['get_params']);
+		$request = DinklyRequest::create($uri);
+		$this->handle($request);
 	}
 
 	/**
@@ -144,7 +155,7 @@ class BaseDinkly
 	 */
 	public function resetContext($uri = null)
 	{
-		$this->context = null;
+		$this->context = array();
 		return $this->getContext($uri);
 	}
 
@@ -158,97 +169,18 @@ class BaseDinkly
 	{
 		if(!$this->context)
 		{
-			if(!$uri) { $uri = $_SERVER['REQUEST_URI']; }
-
-			$current_app_name = $module = $view = null;
-			$context = $parameters = array();
-
-			$default_app_name = static::getDefaultApp(true);
-			$config = static::getConfig();
-
-			//Parse query string in the old style if they're present
-			$unfriendly_parameters = array();
-			if(stristr($uri, '?'))
+			if(!$this->request || $uri && $this->request->getUri() !== $uri)
 			{
-				$orig = $uri;
-				$pos = strpos($uri, '?');
-				$uri = substr($uri, 0, $pos);
-				$query_string = substr($orig, $pos + 1);
-				parse_str($query_string, $unfriendly_parameters);
+				$this->request = DinklyRequest::create($uri);
 			}
 
-			$uri_parts = explode("/", $uri);
-			unset($uri_parts[0]);
-
-			//If the URL is empty, give it a slash so it can match in the config
-			if($uri == "/") { $uri_parts = array(1 => '/'); }
-
-			//Figure out the current app, assume the default if we don't get one in the URL
-			foreach($config['apps'] as $app => $values)
-			{
-				if($app != 'global')
-				{
-					if(!isset($values['base_href']))
-					{
-						throw new Exception('base_href key/value pair missing from config.yml');
-					}
-					$base_href = str_replace('/', '', $values['base_href']);
-					
-					if(strlen($base_href) == 0) { $base_href = '/'; }
-					
-					if($uri_parts[1] == $base_href)
-					{
-						$context['current_app_name'] = $app;
-
-						//kick the app off the uri and reindex
-						array_shift($uri_parts); 
-
-						break;
-					}
-				}
-			}
-
-			//No match, set default app
-			if(!isset($context['current_app_name'])) { $context['current_app_name'] = $default_app_name; }
-
-			//Reset indexes if needed
-			$uri_parts = array_values($uri_parts);
-
-			//Figure out the module and view
-			if(sizeof($uri_parts) == 1) { $context['module'] = $uri_parts[0]; $context['view'] = 'default'; }
-			else if(sizeof($uri_parts) == 2) { $context['module'] = $uri_parts[0]; $context['view'] = $uri_parts[1]; }
-			else if(sizeof($uri_parts) > 2)
-			{
-				for($i = 0; $i < sizeof($uri_parts); $i++)
-				{
-					if($i == 0) { $context['module'] = $uri_parts[0]; }
-					else if($i == 1) { $context['view'] = $uri_parts[1]; }
-					else
-					{
-						if(isset($uri_parts[$i+1]))
-						{
-							$parameters[$uri_parts[$i]] = $uri_parts[$i+1];
-							$i++;
-						}
-						else
-						{
-							$parameters[$uri_parts[$i]] = true;
-						}
-					}
-				}    
-			}
-
-			if(!isset($context['module'])) { $context['module'] = Dinkly::getConfigValue('default_module', $context['current_app_name']); }
-			if(!isset($context['view'])) { $context['view'] = 'default'; }
-
-			$context['get_params'] = array_merge($unfriendly_parameters, $parameters);
-
-			if(isset($_POST))
-			{
-				$context['post_params'] = $_POST;
-			}
-
-			$this->context = $context;
+			$this->context = array(
+				'current_app_name' => $this->request->getApp(),
+				'module' => $this->request->getModule(),
+				'view' => $this->request->getView(),
+				'get_params' => $this->request->fetchGetParams(),
+				'post_params' => $this->request->fetchPostParams(),
+			);
 		}
 
 		$this->updateContextHistory($this->context);
