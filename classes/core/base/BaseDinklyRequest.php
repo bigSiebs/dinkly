@@ -37,6 +37,12 @@ abstract class BaseDinklyRequest
 		$default_app_name = Dinkly::getDefaultApp(true);
 		$config = Dinkly::getConfig();
 
+		if(stristr($uri, '?'))
+		{
+			$pos = strpos($uri, '?');
+			$uri = substr($uri, 0, $pos);
+		}
+
 		$uri_parts = explode('/', $uri);
 		unset($uri_parts[0]);
 		//If the URL is empty, give it a slash so it can match in the config
